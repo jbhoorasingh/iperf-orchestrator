@@ -31,17 +31,11 @@
             <p v-if="exercise.notes" class="text-sm text-gray-600 mt-1">{{ exercise.notes }}</p>
           </div>
           <div class="flex items-center space-x-2">
-            <router-link 
+            <router-link
               :to="`/exercises/${exercise.id}`"
               class="text-indigo-600 hover:text-indigo-900 text-sm font-medium"
             >
               View Details
-            </router-link>
-            <router-link 
-              :to="`/results/${exercise.id}`"
-              class="text-green-600 hover:text-green-900 text-sm font-medium"
-            >
-              Results
             </router-link>
           </div>
         </div>

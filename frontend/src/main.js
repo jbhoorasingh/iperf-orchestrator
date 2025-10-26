@@ -10,7 +10,6 @@ import Agents from './views/Agents.vue'
 import Exercises from './views/Exercises.vue'
 import ExerciseDetail from './views/ExerciseDetail.vue'
 import Tasks from './views/Tasks.vue'
-import Results from './views/Results.vue'
 
 // Import stores
 import { useAuthStore } from './stores/auth'
@@ -21,8 +20,7 @@ const routes = [
   { path: '/agents', name: 'Agents', component: Agents },
   { path: '/exercises', name: 'Exercises', component: Exercises },
   { path: '/exercises/:id', name: 'ExerciseDetail', component: ExerciseDetail },
-  { path: '/tasks', name: 'Tasks', component: Tasks },
-  { path: '/results/:exerciseId', name: 'Results', component: Results }
+  { path: '/tasks', name: 'Tasks', component: Tasks }
 ]
 
 const router = createRouter({
