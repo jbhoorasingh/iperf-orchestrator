@@ -39,4 +39,3 @@ target-version = ['py311']
 profile = "black"
 line_length = 88
 
-*.local.md
