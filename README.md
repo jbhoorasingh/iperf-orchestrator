@@ -41,7 +41,7 @@ A distributed network performance testing platform that coordinates `iperf3` tes
 
 1. **Clone the repository**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/jbhoorasingh/iperf-orchestrator
    cd iperf-orchestrator
    ```
 
