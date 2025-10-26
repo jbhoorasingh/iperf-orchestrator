@@ -1,0 +1,29 @@
+[Unit]
+Description=Iperf Orchestrator Manager
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=iperf-manager
+Group=iperf-manager
+WorkingDirectory=/opt/iperf-manager
+ExecStart=/opt/iperf-manager/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=10s
+EnvironmentFile=/opt/iperf-manager/.env
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=iperf-manager
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/iperf-manager
+
+[Install]
+WantedBy=multi-user.target

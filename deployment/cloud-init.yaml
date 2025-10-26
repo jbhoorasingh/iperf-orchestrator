@@ -1,0 +1,103 @@
+#cloud-config
+# Iperf Orchestrator Agent Cloud-Init Configuration
+
+users:
+  - name: iperf-agent
+    groups: [sudo, systemd-journal]
+    shell: /bin/bash
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']
+
+write_files:
+  - path: /opt/iperf-agent/agent.py
+    content: |
+      #!/usr/bin/env python3
+      # Agent script will be downloaded or embedded here
+      # This is a placeholder - the actual agent.py should be deployed
+    permissions: '0755'
+    owner: iperf-agent:iperf-agent
+
+  - path: /opt/iperf-agent/.env
+    content: |
+      MANAGER_URL=http://your-manager-url:8000
+      AGENT_NAME=agent-${instance_id}
+      AGENT_KEY=your-registration-key-here
+      API_VERSION=1
+    permissions: '0644'
+    owner: iperf-agent:iperf-agent
+
+  - path: /etc/systemd/system/iperf-agent.service
+    content: |
+      [Unit]
+      Description=Iperf Orchestrator Agent
+      After=network.target
+      Wants=network.target
+
+      [Service]
+      Type=simple
+      User=iperf-agent
+      Group=iperf-agent
+      WorkingDirectory=/opt/iperf-agent
+      ExecStart=/usr/bin/python3 /opt/iperf-agent/agent.py
+      Restart=on-failure
+      RestartSec=10s
+      EnvironmentFile=/opt/iperf-agent/.env
+
+      # Logging
+      StandardOutput=journal
+      StandardError=journal
+      SyslogIdentifier=iperf-agent
+
+      # Security
+      NoNewPrivileges=true
+      PrivateTmp=true
+      ProtectSystem=strict
+      ProtectHome=true
+      ReadWritePaths=/opt/iperf-agent
+
+      [Install]
+      WantedBy=multi-user.target
+    permissions: '0644'
+
+  - path: /opt/iperf-agent/requirements.txt
+    content: |
+      httpx==0.25.2
+      psutil==5.9.6
+      pydantic==2.5.0
+      pydantic-settings==2.1.0
+    permissions: '0644'
+    owner: iperf-agent:iperf-agent
+
+packages:
+  - python3
+  - python3-pip
+  - python3-venv
+  - iperf3
+  - curl
+  - wget
+
+runcmd:
+  # Create virtual environment
+  - python3 -m venv /opt/iperf-agent/venv
+  
+  # Install Python dependencies
+  - /opt/iperf-agent/venv/bin/pip install --upgrade pip
+  - /opt/iperf-agent/venv/bin/pip install -r /opt/iperf-agent/requirements.txt
+  
+  # Download agent script (replace with actual URL)
+  - curl -o /opt/iperf-agent/agent.py https://raw.githubusercontent.com/your-repo/iperf-orchestrator/main/agent/agent.py || echo "Failed to download agent script"
+  
+  # Make agent script executable
+  - chmod +x /opt/iperf-agent/agent.py
+  
+  # Update agent script to use virtual environment
+  - sed -i '1s|^#!/usr/bin/env python3|#!/opt/iperf-agent/venv/bin/python3|' /opt/iperf-agent/agent.py
+  
+  # Enable and start the service
+  - systemctl daemon-reload
+  - systemctl enable iperf-agent.service
+  - systemctl start iperf-agent.service
+  
+  # Check service status
+  - systemctl status iperf-agent.service
+
+final_message: "Iperf Orchestrator Agent setup complete. Check /var/log/cloud-init-output.log for details."

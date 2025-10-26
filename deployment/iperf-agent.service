@@ -1,0 +1,29 @@
+[Unit]
+Description=Iperf Orchestrator Agent
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=iperf-agent
+Group=iperf-agent
+WorkingDirectory=/opt/iperf-agent
+ExecStart=/opt/iperf-agent/venv/bin/python3 /opt/iperf-agent/agent.py
+Restart=on-failure
+RestartSec=10s
+EnvironmentFile=/opt/iperf-agent/.env
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=iperf-agent
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/iperf-agent
+
+[Install]
+WantedBy=multi-user.target

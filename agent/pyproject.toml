@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "iperf-orchestrator-agent"
+version = "0.1.0"
+description = "Iperf Orchestrator Agent"
+authors = ["Your Name <your.email@example.com>"]
+readme = "README.md"
+packages = [{include = "agent"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+httpx = "^0.25.2"
+psutil = "^5.9.6"
+pydantic = "^2.5.0"
+pydantic-settings = "^2.1.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
