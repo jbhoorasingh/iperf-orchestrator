@@ -201,4 +201,11 @@ dmypy.json
 
 *.local.md
 
+# Agent results - development 
 /agent/results/
+
+# SQLite Database
+iperf_orchestrator.db
+iperf_orchestrator.db-journal
+iperf_orchestrator.db-shm
+iperf_orchestrator.db-wal
