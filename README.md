@@ -48,19 +48,17 @@ A distributed network performance testing platform that coordinates `iperf3` tes
 2. **Backend Setup**
    ```bash
    cd backend
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   pip install -r requirements.txt
+   poetry install
    
    # Copy environment file
    cp env.example .env
    # Edit .env with your settings
    
    # Run database migrations
-   alembic upgrade head
+   poetry alembic upgrade head
    
    # Start the backend
-   uvicorn app.main:app --reload
+   poetry run uvicorn app.main:app --reload
    ```
 
 3. **Frontend Setup**
@@ -73,14 +71,14 @@ A distributed network performance testing platform that coordinates `iperf3` tes
 4. **Agent Setup**
    ```bash
    cd agent
-   pip install -r requirements.txt
+   poetry install
    
    # Copy environment file
    cp env.example .env
    # Edit .env with manager URL and agent credentials
    
-   # Run the agent
-   python agent.py
+   # Run the agent - arguements override .env
+   poetry run python agent.py --manager-url http://localhost:8000 --agent-name agent1 --agent-key secret-key-123 --api-version 1
    ```
 
 ### Docker Setup
