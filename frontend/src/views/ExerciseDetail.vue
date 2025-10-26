@@ -752,7 +752,7 @@ export default {
 
     const fetchReservations = async () => {
       try {
-        reservations.value = await apiStore.get('/v1/ports/reservations')
+        reservations.value = await apiStore.get('/v1/tasks/ports/reservations')
       } catch (err) {
         console.error('Failed to fetch reservations:', err)
       }

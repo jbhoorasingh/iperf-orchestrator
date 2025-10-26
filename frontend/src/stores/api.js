@@ -1,6 +1,34 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import axios from 'axios'
+import { useAuthStore } from './auth'
+import router from '../router'
+
+// Setup axios response interceptor for handling 401 errors
+let isInterceptorSetup = false
+
+const setupAxiosInterceptor = () => {
+  if (isInterceptorSetup) return
+
+  axios.interceptors.response.use(
+    (response) => response,
+    (error) => {
+      // Handle 401 Unauthorized - token expired or invalid
+      if (error.response && error.response.status === 401) {
+        const authStore = useAuthStore()
+
+        // Only logout if we're not already on the login page
+        if (router.currentRoute.value.name !== 'Login') {
+          authStore.logout()
+          router.push({ name: 'Login' })
+        }
+      }
+      return Promise.reject(error)
+    }
+  )
+
+  isInterceptorSetup = true
+}
 
 // Helper function to extract meaningful error messages from API responses
 const getErrorMessage = (error) => {
@@ -48,6 +76,9 @@ const getErrorMessage = (error) => {
 }
 
 export const useApiStore = defineStore('api', () => {
+  // Setup interceptor on first use
+  setupAxiosInterceptor()
+
   const loading = ref(false)
   const error = ref(null)
 
