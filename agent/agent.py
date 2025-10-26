@@ -639,12 +639,54 @@ class IperfAgent:
             self.log("error", "Kill all error", {"task_id": task_id, "error": str(e)})
             await self.submit_task_result(task_id, "failed", stderr=str(e), exit_code=1)
     
+    async def _cleanup_orphaned_iperf_processes(self):
+        """Kill any orphaned iperf3 processes from previous runs"""
+        try:
+            # Find all iperf3 processes
+            result = subprocess.run(
+                ["pgrep", "-f", "iperf3"],
+                capture_output=True,
+                text=True
+            )
+
+            if result.returncode == 0 and result.stdout.strip():
+                pids = result.stdout.strip().split('\n')
+                killed_count = 0
+
+                for pid_str in pids:
+                    try:
+                        pid = int(pid_str)
+                        # Kill the process
+                        subprocess.run(["kill", "-9", str(pid)], check=False)
+                        killed_count += 1
+                    except (ValueError, Exception) as e:
+                        self.log("warning", "Failed to kill orphaned process", {
+                            "pid": pid_str,
+                            "error": str(e)
+                        })
+
+                if killed_count > 0:
+                    self.log("info", "Cleaned up orphaned iperf3 processes", {
+                        "count": killed_count
+                    })
+
+        except FileNotFoundError:
+            # pgrep not available, try alternative method
+            self.log("debug", "pgrep not available, skipping orphaned process cleanup")
+        except Exception as e:
+            self.log("error", "Error during orphaned process cleanup", {
+                "error": str(e)
+            })
+
     async def run(self):
         """Main agent loop"""
         self.log("info", "Starting agent", {
             "agent_name": self.settings.agent_name,
             "manager_url": self.settings.manager_url
         })
+
+        # Clean up any orphaned iperf3 processes from previous runs
+        await self._cleanup_orphaned_iperf_processes()
 
         # Register with manager
         if not await self.register():
@@ -696,6 +738,45 @@ class IperfAgent:
 
         # Cleanup
         self.log("info", "Agent shutting down")
+
+        # Kill all running iperf processes before shutdown
+        if self.running_processes:
+            self.log("info", "Cleaning up running iperf processes on shutdown", {
+                "count": len(self.running_processes)
+            })
+
+            for task_id, proc in list(self.running_processes.items()):
+                try:
+                    self.log("info", "Killing iperf process on shutdown", {
+                        "task_id": task_id,
+                        "pid": proc.pid,
+                        "port": proc.port,
+                        "type": proc.process_type
+                    })
+
+                    # Try graceful termination first
+                    proc.process.terminate()
+                    try:
+                        # Wait up to 2 seconds for graceful shutdown
+                        proc.process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        # Force kill if it didn't terminate
+                        proc.process.kill()
+                        proc.process.wait()
+
+                    self.log("info", "Process killed on shutdown", {
+                        "task_id": task_id,
+                        "pid": proc.pid
+                    })
+
+                except Exception as e:
+                    self.log("error", "Failed to kill process on shutdown", {
+                        "task_id": task_id,
+                        "pid": proc.pid if proc else "unknown",
+                        "error": str(e)
+                    })
+
+            self.running_processes.clear()
 
         # Wait for any running tasks to complete
         if self.running_tasks:

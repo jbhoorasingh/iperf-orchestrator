@@ -158,9 +158,36 @@ async def exercise_auto_ender():
                     all_terminal = all(task.status in terminal_states for task in all_tasks)
 
                     if all_terminal:
-                        # Auto-end the exercise
+                        # Get all agents involved in this exercise
+                        agent_ids = set()
+                        for test in tests:
+                            agent_ids.add(test.server_agent_id)
+                            agent_ids.add(test.client_agent_id)
+
+                        # Create kill_all tasks for each agent to clean up iperf processes
+                        for agent_id in agent_ids:
+                            kill_task = Task(
+                                type="kill_all",
+                                agent_id=agent_id,
+                                status="pending",
+                                payload={},
+                                created_at=datetime.utcnow()
+                            )
+                            db.add(kill_task)
+
+                        # Release all port reservations for this exercise
+                        for test in tests:
+                            if test.server_task_id:
+                                reservation = db.query(PortReservation).filter(
+                                    PortReservation.task_id == test.server_task_id
+                                ).first()
+                                if reservation:
+                                    reservation.released_at = datetime.utcnow()
+
+                        # Mark exercise as ended
                         exercise.ended_at = datetime.utcnow()
-                        logger.info(f"Auto-ended exercise {exercise.id} ({exercise.name}) - all tasks completed")
+
+                        logger.info(f"Auto-ended exercise {exercise.id} ({exercise.name}) - all tasks completed, cleanup initiated")
 
                 db.commit()
             finally:

@@ -127,6 +127,8 @@ The Manager runs several background tasks:
 
 4. **Exercise Auto-Ender** (5s interval)
    - Automatically ends exercises when all tasks are in terminal states (succeeded, failed, timed_out, canceled)
+   - Creates kill_all tasks to clean up iperf server processes
+   - Releases port reservations
    - Keeps manual stop option available via API
 
 ## API Endpoints
