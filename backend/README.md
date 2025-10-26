@@ -125,6 +125,10 @@ The Manager runs several background tasks:
    - Releases port reservations for terminal server tasks
    - Cleans up stale reservations
 
+4. **Exercise Auto-Ender** (5s interval)
+   - Automatically ends exercises when all tasks are in terminal states (succeeded, failed, timed_out, canceled)
+   - Keeps manual stop option available via API
+
 ## API Endpoints
 
 ### Admin Endpoints (require Bearer token)

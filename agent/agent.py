@@ -448,98 +448,151 @@ class IperfAgent:
             await self.submit_task_result(task_id, "failed", stderr=str(e), exit_code=1)
     
     async def _execute_client_task(self, task_id: int, payload: Dict[str, Any]):
-        """Execute client task"""
-        try:
-            # Add client delay if specified
-            delay = payload.get("client_delay_seconds", 2)
-            if delay > 0:
-                self.log("info", "Client delay", {"task_id": task_id, "delay": delay})
-                await asyncio.sleep(delay)
+        """Execute client task with retry logic"""
+        max_retries = payload.get("max_retries", 3)
+        retry_delay = payload.get("retry_delay_seconds", 2)
 
-            cmd = self.build_iperf_command("iperf_client_run", payload)
-
-            self.log("info", "Starting iperf client", {
-                "task_id": task_id,
-                "command": " ".join(cmd),
-                "server": payload["server_ip"],
-                "port": payload["port"]
-            })
-
-            # Start client process
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-
-            # Store process info
-            self.running_processes[task_id] = RunningProcess(
-                task_id=task_id,
-                process_type="client",
-                port=payload["port"],
-                pid=process.pid,
-                process=process
-            )
-
-            # Mark as started
-            mark_result = await self.mark_task_started(task_id, process.pid)
-            if not mark_result:
-                self.log("warning", "Failed to mark task as started, but continuing", {"task_id": task_id})
-
-            self.log("info", "Client task started", {
-                "task_id": task_id,
-                "pid": process.pid,
-                "server_ip": payload["server_ip"],
-                "port": payload["port"]
-            })
-            
-            # Wait for completion asynchronously
-            stdout, stderr = await asyncio.get_event_loop().run_in_executor(
-                None, process.communicate
-            )
-            
-            # Remove from running processes
-            if task_id in self.running_processes:
-                del self.running_processes[task_id]
-            
-            # Parse result
-            if process.returncode == 0:
-                try:
-                    result = json.loads(stdout)
-
-                    # Save result to file
-                    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-                    result_file = self.results_dir / f"task_{task_id}_{timestamp}.json"
-                    with open(result_file, 'w') as f:
-                        json.dump(result, f, indent=2)
-
-                    self.log("info", "Client task completed", {
+        for attempt in range(max_retries):
+            try:
+                # Add client delay if specified (only on first attempt)
+                if attempt == 0:
+                    delay = payload.get("client_delay_seconds", 3)
+                    if delay > 0:
+                        self.log("info", "Client initial delay", {"task_id": task_id, "delay": delay})
+                        await asyncio.sleep(delay)
+                elif attempt > 0:
+                    # Exponential backoff for retries
+                    backoff = retry_delay * (2 ** (attempt - 1))
+                    self.log("info", "Client retry delay", {
                         "task_id": task_id,
-                        "result_file": str(result_file),
-                        "server": payload["server_ip"],
-                        "port": payload["port"]
+                        "attempt": attempt + 1,
+                        "delay": backoff
                     })
+                    await asyncio.sleep(backoff)
 
-                    await self.submit_task_result(task_id, "succeeded", result, stderr, process.returncode)
-                except json.JSONDecodeError as e:
-                    self.log("error", "Failed to parse iperf JSON output", {
-                        "task_id": task_id,
-                        "error": str(e),
-                        "stdout": stdout[:500]
-                    })
-                    await self.submit_task_result(task_id, "failed", stderr="Invalid JSON output", exit_code=1)
-            else:
-                self.log("error", "Client task failed", {
+                cmd = self.build_iperf_command("iperf_client_run", payload)
+
+                self.log("info", "Starting iperf client", {
                     "task_id": task_id,
-                    "stderr": stderr,
-                    "exit_code": process.returncode
+                    "attempt": attempt + 1,
+                    "max_retries": max_retries,
+                    "command": " ".join(cmd),
+                    "server": payload["server_ip"],
+                    "port": payload["port"]
                 })
-                await self.submit_task_result(task_id, "failed", stderr=stderr, exit_code=process.returncode)
-        
-        except Exception as e:
-            self.log("error", "Client task error", {"task_id": task_id, "error": str(e)})
-            await self.submit_task_result(task_id, "failed", stderr=str(e), exit_code=1)
+
+                # Start client process
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+
+                # Store process info
+                self.running_processes[task_id] = RunningProcess(
+                    task_id=task_id,
+                    process_type="client",
+                    port=payload["port"],
+                    pid=process.pid,
+                    process=process
+                )
+
+                # Mark as started (only on first attempt)
+                if attempt == 0:
+                    mark_result = await self.mark_task_started(task_id, process.pid)
+                    if not mark_result:
+                        self.log("warning", "Failed to mark task as started, but continuing", {"task_id": task_id})
+
+                self.log("info", "Client task started", {
+                    "task_id": task_id,
+                    "attempt": attempt + 1,
+                    "pid": process.pid,
+                    "server_ip": payload["server_ip"],
+                    "port": payload["port"]
+                })
+
+                # Wait for completion asynchronously
+                stdout, stderr = await asyncio.get_event_loop().run_in_executor(
+                    None, process.communicate
+                )
+
+                # Remove from running processes
+                if task_id in self.running_processes:
+                    del self.running_processes[task_id]
+
+                # Parse result
+                if process.returncode == 0:
+                    try:
+                        result = json.loads(stdout)
+
+                        # Save result to file
+                        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+                        result_file = self.results_dir / f"task_{task_id}_{timestamp}.json"
+                        with open(result_file, 'w') as f:
+                            json.dump(result, f, indent=2)
+
+                        self.log("info", "Client task completed", {
+                            "task_id": task_id,
+                            "attempt": attempt + 1,
+                            "result_file": str(result_file),
+                            "server": payload["server_ip"],
+                            "port": payload["port"]
+                        })
+
+                        await self.submit_task_result(task_id, "succeeded", result, stderr, process.returncode)
+                        return  # Success! Exit retry loop
+
+                    except json.JSONDecodeError as e:
+                        self.log("error", "Failed to parse iperf JSON output", {
+                            "task_id": task_id,
+                            "error": str(e),
+                            "stdout": stdout[:500]
+                        })
+                        await self.submit_task_result(task_id, "failed", stderr="Invalid JSON output", exit_code=1)
+                        return  # Don't retry on JSON parse errors
+
+                else:
+                    # Check if this is a connection error that we should retry
+                    error_msg = stderr if stderr else stdout if stdout else ""
+                    is_connection_error = "Connection refused" in error_msg or "No route to host" in error_msg or "unable to connect" in error_msg.lower()
+
+                    if is_connection_error and attempt < max_retries - 1:
+                        self.log("warning", "Client connection failed, will retry", {
+                            "task_id": task_id,
+                            "attempt": attempt + 1,
+                            "max_retries": max_retries,
+                            "stdout": stdout[:200] if stdout else "",
+                            "stderr": stderr[:200] if stderr else "",
+                            "exit_code": process.returncode
+                        })
+                        continue  # Retry
+                    else:
+                        # Final failure or non-retryable error
+                        self.log("error", "Client task failed", {
+                            "task_id": task_id,
+                            "attempt": attempt + 1,
+                            "stdout": stdout[:500] if stdout else "",
+                            "stderr": stderr[:500] if stderr else "",
+                            "exit_code": process.returncode
+                        })
+                        # Combine stdout and stderr for error message (iperf3 often writes errors to stdout)
+                        final_error = stderr if stderr else stdout if stdout else f"Exit code {process.returncode}"
+                        await self.submit_task_result(task_id, "failed", stderr=final_error, exit_code=process.returncode)
+                        return
+
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    self.log("warning", "Client task error, will retry", {
+                        "task_id": task_id,
+                        "attempt": attempt + 1,
+                        "error": str(e)
+                    })
+                    continue  # Retry
+                else:
+                    self.log("error", "Client task error", {"task_id": task_id, "error": str(e)})
+                    await self.submit_task_result(task_id, "failed", stderr=str(e), exit_code=1)
+                    return
     
     async def _execute_kill_all_task(self, task_id: int, payload: Dict[str, Any]):
         """Execute kill_all task"""
