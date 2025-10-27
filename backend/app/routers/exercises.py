@@ -116,7 +116,18 @@ async def add_test(
                 "details": {"exercise_id": exercise_id}
             }
         )
-    
+
+    # Prevent adding tests to started exercises
+    if exercise.started_at:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "exercise_already_started",
+                "message": "Cannot add tests to an exercise that has already started",
+                "details": {"exercise_id": exercise_id, "started_at": exercise.started_at}
+            }
+        )
+
     # Validate agents exist
     server_agent = db.query(Agent).filter(Agent.id == test_data.server_agent_id).first()
     client_agent = db.query(Agent).filter(Agent.id == test_data.client_agent_id).first()

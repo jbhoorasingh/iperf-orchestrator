@@ -207,15 +207,19 @@
         <div class="flex justify-between items-center mb-4">
           <h2 class="text-lg font-medium text-gray-900">All Tests</h2>
           <button
+            v-if="!exercise.started_at"
             @click="showAddTestModal = true"
             class="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700"
           >
             Add Test
           </button>
+          <div v-else class="text-sm text-gray-500 italic">
+            Cannot add tests after exercise has started
+          </div>
         </div>
 
         <div v-if="tests.length === 0" class="text-center py-8 text-gray-500">
-          No tests added yet. Click "Add Test" to get started.
+          No tests added yet. {{ exercise.started_at ? 'Exercise already started.' : 'Click "Add Test" to get started.' }}
         </div>
 
         <div v-else class="overflow-x-auto">
