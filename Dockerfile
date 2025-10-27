@@ -1,7 +1,7 @@
 # Multi-stage build for Iperf Orchestrator Manager (Backend + Frontend)
 
 # Stage 1: Build Frontend
-FROM node:18-alpine as frontend-builder
+FROM node:18-alpine AS frontend-builder
 
 WORKDIR /app/frontend
 
@@ -18,19 +18,19 @@ COPY frontend/ ./
 RUN npm run build
 
 # Stage 2: Build Backend
-FROM python:3.11-slim as backend-builder
+FROM python:3.11-slim AS backend-builder
 
 WORKDIR /app/backend
 
-# Install Poetry
-RUN pip install poetry
+# Install Poetry (specific version for compatibility)
+RUN pip install poetry==1.7.1
 
 # Copy backend Poetry files
 COPY backend/pyproject.toml backend/poetry.lock* ./
 
 # Configure Poetry and install dependencies
 RUN poetry config virtualenvs.create false && \
-    poetry install --no-dev
+    poetry install --without dev --no-root
 
 # Stage 3: Production
 FROM python:3.11-slim

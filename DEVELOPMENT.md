@@ -15,20 +15,24 @@ This guide covers development setup, testing, and contribution guidelines for th
 
 1. **Clone the repository**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/jbhoorasingh/iperf-orchestrator.git
    cd iperf-orchestrator
    ```
 
 2. **Backend Setup**
    ```bash
    cd backend
-   python -m venv venv
-   source venv/bin/activate
-   pip install -r requirements.txt
+   poetry install
+   
+   # Copy environment file
    cp env.example .env
    # Edit .env with your settings
-   alembic upgrade head
-   uvicorn app.main:app --reload
+   
+   # Run database migrations
+   poetry alembic upgrade head
+   
+   # Start the backend
+   poetry run uvicorn app.main:app --reload
    ```
 
 3. **Frontend Setup**
@@ -41,10 +45,14 @@ This guide covers development setup, testing, and contribution guidelines for th
 4. **Agent Setup**
    ```bash
    cd agent
-   pip install -r requirements.txt
+   poetry install
+   
+   # Copy environment file
    cp env.example .env
-   # Edit .env with manager URL and credentials
-   python agent.py
+   # Edit .env with manager URL and agent credentials
+   
+   # Run the agent - arguements override .env
+   poetry run python agent.py --manager-url http://localhost:8000 --agent-name agent1 --agent-key secret-key-123 --api-version 1
    ```
 
 ## Project Structure
