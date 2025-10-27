@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  iperf-orchestrator:
+    build: .
+    container_name: iperf-orchestrator
+    ports:
+      - "80:80"
+    environment:
+      - DATABASE_URL=sqlite:///./data/iperf_orchestrator.db
+      - SECRET_KEY=${SECRET_KEY:-change-this-secret-key-in-production}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
+      - API_VERSION=1
+    volumes:
+      - iperf-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  iperf-data:
+    driver: local
