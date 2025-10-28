@@ -18,6 +18,7 @@ import platform
 import uuid
 import argparse
 import logging
+import traceback
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
@@ -187,21 +188,32 @@ class IperfAgent:
             return True
             
         except Exception as e:
-            self.log("error", "Registration error", {"error": str(e)})
+            self.log("error", "Registration error", {
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "traceback": traceback.format_exc()
+            })
             return False
     
-    async def heartbeat(self) -> bool:
-        """Send heartbeat to Manager"""
+    async def heartbeat(self) -> tuple[bool, bool]:
+        """
+        Send heartbeat to Manager
+
+        Returns:
+            tuple[bool, bool]: (success, should_exit)
+                - success: True if heartbeat succeeded and can pull tasks
+                - should_exit: True if agent should exit (404 or fatal error)
+        """
         try:
-            # Collect running processes
+            # Collect running processes (create a snapshot to avoid race conditions)
             running = []
-            for proc in self.running_processes.values():
+            for proc in list(self.running_processes.values()):
                 running.append({
                     "type": proc.process_type,
                     "port": proc.port,
                     "pid": proc.pid
                 })
-            
+
             headers = {
                 "X-AGENT-NAME": self.settings.agent_name,
                 "X-AGENT-KEY": self.settings.agent_key,
@@ -209,35 +221,49 @@ class IperfAgent:
                 "Idempotency-Key": str(uuid.uuid4()),
                 "Content-Type": "application/json"
             }
-            
+
             payload = {
                 "ip_address": self.get_local_ip(),
                 "running": running
             }
-            
+
             response = await self.client.post(
                 f"{self.settings.manager_url}/v1/agent/heartbeat",
                 headers=headers,
                 json=payload
             )
-            
+
             if response.status_code == 404:
-                self.log("error", "Agent not found - must exit", {"status_code": 404})
-                return False
-            
+                self.log("error", "Agent not found or disabled - must exit", {"status_code": 404})
+                return False, True  # Fail and exit immediately
+
             if response.status_code != 200:
                 self.log("error", "Heartbeat failed", {
                     "status_code": response.status_code,
                     "response": response.text
                 })
-                return False
-            
+                return False, False  # Fail but don't exit (retry)
+
             result = response.json()
-            return result.get("pull_tasks", False)
-            
+            pull_tasks = result.get("pull_tasks", False)
+            return pull_tasks, False  # Success, don't exit
+
+        except (httpx.ReadError, httpx.ConnectError, httpx.RemoteProtocolError) as e:
+            # Transient network errors - log and retry
+            self.log("warning", "Transient network error during heartbeat", {
+                "error": str(e),
+                "error_type": type(e).__name__
+            })
+            return False, False  # Fail but don't exit (retry)
+
         except Exception as e:
-            self.log("error", "Heartbeat error", {"error": str(e)})
-            return False
+            # Unexpected error - log full traceback
+            self.log("error", "Heartbeat error", {
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "traceback": traceback.format_exc()
+            })
+            return False, False  # Fail but don't exit (retry)
     
     async def claim_task(self) -> Optional[Dict[str, Any]]:
         """Claim a task from the Manager"""
@@ -400,14 +426,14 @@ class IperfAgent:
                 await self.submit_task_result(task_id, "failed", stderr=f"Unknown task type: {task_type}", exit_code=1)
 
         except Exception as e:
-            import traceback
             error_trace = traceback.format_exc()
             self.log("error", "Task execution error", {
                 "task_id": task_id,
                 "error": str(e),
+                "error_type": type(e).__name__,
                 "traceback": error_trace
             })
-            await self.submit_task_result(task_id, "failed", stderr=f"{str(e)}\n{error_trace}", exit_code=1)
+            await self.submit_task_result(task_id, "failed", stderr=f"{type(e).__name__}: {str(e)}\n{error_trace}", exit_code=1)
     
     async def _execute_server_task(self, task_id: int, payload: Dict[str, Any]):
         """Execute server task"""
@@ -693,7 +719,10 @@ class IperfAgent:
             self.log("error", "Registration failed - exiting")
             return
 
-        # Main loop
+        # Main loop with failure tracking
+        consecutive_failures = 0
+        max_consecutive_failures = 3
+
         while not self.should_exit:
             try:
                 # Clean up completed tasks
@@ -705,10 +734,40 @@ class IperfAgent:
                     del self.running_tasks[task_id]
 
                 # Send heartbeat
-                pull_tasks = await self.heartbeat()
-                if not pull_tasks:
-                    self.log("error", "Heartbeat failed - exiting")
+                pull_tasks, should_exit = await self.heartbeat()
+
+                if should_exit:
+                    # Fatal error (404 - agent disabled)
+                    self.log("error", "Fatal error - exiting")
                     break
+
+                if not pull_tasks and consecutive_failures == 0:
+                    # First failure - just a transient error
+                    consecutive_failures += 1
+                    self.log("warning", "Heartbeat failed, will retry", {
+                        "consecutive_failures": consecutive_failures,
+                        "max_failures": max_consecutive_failures
+                    })
+                elif not pull_tasks:
+                    # Subsequent failure
+                    consecutive_failures += 1
+                    if consecutive_failures >= max_consecutive_failures:
+                        self.log("error", "Too many consecutive heartbeat failures - exiting", {
+                            "consecutive_failures": consecutive_failures
+                        })
+                        break
+                    else:
+                        self.log("warning", "Heartbeat failed again, will retry", {
+                            "consecutive_failures": consecutive_failures,
+                            "max_failures": max_consecutive_failures
+                        })
+                else:
+                    # Success - reset failure counter
+                    if consecutive_failures > 0:
+                        self.log("info", "Heartbeat recovered", {
+                            "previous_failures": consecutive_failures
+                        })
+                    consecutive_failures = 0
 
                 # Claim and execute tasks if needed (claim multiple for concurrent execution)
                 if pull_tasks:
@@ -733,7 +792,11 @@ class IperfAgent:
                 await asyncio.sleep(5)
 
             except Exception as e:
-                self.log("error", "Main loop error", {"error": str(e)})
+                self.log("error", "Main loop error", {
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "traceback": traceback.format_exc()
+                })
                 await asyncio.sleep(5)
 
         # Cleanup
