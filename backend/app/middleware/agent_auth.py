@@ -36,4 +36,13 @@ def get_agent_from_headers(request: Request, db: Session) -> Agent:
             }
         )
 
+    if agent.disabled:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": "agent_disabled",
+                "message": "Agent has been disabled - agent must exit"
+            }
+        )
+
     return agent

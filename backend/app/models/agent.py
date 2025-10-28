@@ -5,11 +5,12 @@ from app.database import Base
 
 class Agent(Base):
     __tablename__ = "agents"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, nullable=False, index=True)
     registration_key = Column(String, nullable=False)
     status = Column(String, nullable=False, default="offline")  # online, offline
+    disabled = Column(Boolean, nullable=False, default=False)
     first_registered = Column(DateTime, nullable=False)
     last_heartbeat = Column(DateTime, nullable=True)
     ip_address = Column(String, nullable=True)

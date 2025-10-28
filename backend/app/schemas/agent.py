@@ -13,9 +13,16 @@ class AgentCreate(AgentBase):
     pass
 
 
+class AgentUpdate(BaseModel):
+    name: Optional[str] = None
+    registration_key: Optional[str] = None
+    operating_system: Optional[str] = None
+
+
 class Agent(AgentBase):
     id: int
     status: str
+    disabled: bool
     first_registered: datetime
     last_heartbeat: Optional[datetime] = None
     ip_address: Optional[str] = None
