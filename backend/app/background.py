@@ -63,13 +63,14 @@ def _run_timeout_sweeper():
             if task.started_at:
                 # Get time from payload
                 time_seconds = task.payload.get("time", 30)
-                grace_seconds = 10  # 10 second grace period
+                # Use proportional grace period: 10% of test duration or minimum 30 seconds
+                grace_seconds = max(30, int(time_seconds * 0.1))
                 timeout_time = task.started_at + timedelta(seconds=time_seconds + grace_seconds)
 
                 if datetime.utcnow() > timeout_time:
                     task.status = "timed_out"
                     task.finished_at = datetime.utcnow()
-                    logger.info(f"Task {task.id} timed out")
+                    logger.info(f"Task {task.id} timed out after {time_seconds}s + {grace_seconds}s grace")
 
         db.commit()
     finally:
