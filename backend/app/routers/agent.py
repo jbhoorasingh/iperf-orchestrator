@@ -208,17 +208,19 @@ async def submit_task_result(
             }
         )
 
-    if task.status not in ["running", "accepted"]:
+    # Allow result submission for running, accepted, or timed_out tasks
+    # (timed_out can occur if task completed just after timeout_sweeper ran)
+    if task.status not in ["running", "accepted", "timed_out"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
                 "error": "invalid_task_state",
-                "message": "Task must be in running or accepted state",
+                "message": "Task must be in running, accepted, or timed_out state",
                 "details": {"current_status": task.status}
             }
         )
 
-    # Update task
+    # Update task - if it was timed_out but agent has results, accept them
     task.status = body.status
     task.finished_at = datetime.utcnow()
     task.result = body.result
