@@ -210,19 +210,28 @@ async def submit_task_result(
 
     # Allow result submission for running, accepted, or timed_out tasks
     # (timed_out can occur if task completed just after timeout_sweeper ran)
-    if task.status not in ["running", "accepted", "timed_out"]:
+    # Also allow succeeded for server tasks (to capture server-side JSON results)
+    allowed_statuses = ["running", "accepted", "timed_out"]
+    if task.type == "iperf_server_start":
+        allowed_statuses.append("succeeded")
+
+    if task.status not in allowed_statuses:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
                 "error": "invalid_task_state",
-                "message": "Task must be in running, accepted, or timed_out state",
+                "message": f"Task must be in {', '.join(allowed_statuses)} state",
                 "details": {"current_status": task.status}
             }
         )
 
     # Update task - if it was timed_out but agent has results, accept them
-    task.status = body.status
-    task.finished_at = datetime.utcnow()
+    # For server tasks that are already succeeded, just update the result without changing status/finished_at
+    if task.status != "succeeded":
+        task.status = body.status
+        task.finished_at = datetime.utcnow()
+
+    # Always update result and error (allows server result updates)
     task.result = body.result
     task.error = body.stderr if body.status == "failed" else None
     

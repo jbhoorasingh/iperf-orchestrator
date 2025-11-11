@@ -16,6 +16,10 @@ export default {
       required: true,
       default: () => []
     },
+    serverData: {
+      type: Array,
+      default: null
+    },
     width: {
       type: Number,
       default: 200
@@ -27,6 +31,10 @@ export default {
     color: {
       type: String,
       default: '#6366f1'
+    },
+    serverColor: {
+      type: String,
+      default: '#3b82f6'
     }
   },
   setup(props) {
@@ -43,20 +51,44 @@ export default {
 
       const ctx = chartRef.value.getContext('2d')
 
+      // Build datasets array
+      const datasets = [
+        {
+          label: 'Client',
+          data: props.data,
+          borderColor: props.color,
+          backgroundColor: props.color + '20',
+          borderWidth: 2,
+          fill: true,
+          tension: 0.4,
+          pointRadius: 0,
+          pointHoverRadius: 0,
+        }
+      ]
+
+      // Add server dataset if available
+      if (props.serverData && props.serverData.length > 0) {
+        datasets.push({
+          label: 'Server',
+          data: props.serverData,
+          borderColor: props.serverColor,
+          backgroundColor: props.serverColor + '20',
+          borderWidth: 2,
+          fill: true,
+          tension: 0.4,
+          pointRadius: 0,
+          pointHoverRadius: 0,
+        })
+      }
+
+      // Use the longer dataset for labels
+      const maxLength = Math.max(props.data.length, props.serverData?.length || 0)
+
       chartInstance = new Chart(ctx, {
         type: 'line',
         data: {
-          labels: props.data.map((_, i) => i + 1),
-          datasets: [{
-            data: props.data,
-            borderColor: props.color,
-            backgroundColor: props.color + '20',
-            borderWidth: 2,
-            fill: true,
-            tension: 0.4,
-            pointRadius: 0,
-            pointHoverRadius: 0,
-          }]
+          labels: Array.from({ length: maxLength }, (_, i) => i + 1),
+          datasets
         },
         options: {
           responsive: false,
@@ -66,7 +98,7 @@ export default {
               display: false
             },
             tooltip: {
-              enabled: false
+              enabled: props.serverData && props.serverData.length > 0
             }
           },
           scales: {
@@ -86,7 +118,7 @@ export default {
       createChart()
     })
 
-    watch(() => props.data, () => {
+    watch(() => [props.data, props.serverData], () => {
       createChart()
     }, { deep: true })
 

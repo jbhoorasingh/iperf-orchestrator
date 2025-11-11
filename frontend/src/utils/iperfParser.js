@@ -32,24 +32,39 @@ export function parseIperfResult(result) {
   const isUdp = start?.test_start?.protocol === 'UDP'
 
   // Get summary section based on protocol
-  const summary = isUdp ? end.sum : end.sum_sent
+  // For server results, use sum_received (receiver perspective)
+  // For client results, use sum_sent (sender perspective)
+  // Check which one has actual data (non-zero bytes)
+  let summary
+  if (isUdp) {
+    summary = end.sum
+  } else {
+    // TCP: prefer sum_sent, but fallback to sum_received for server results
+    if (end.sum_sent && end.sum_sent.bytes > 0) {
+      summary = end.sum_sent
+    } else if (end.sum_received && end.sum_received.bytes > 0) {
+      summary = end.sum_received
+    } else {
+      summary = end.sum_sent || end.sum_received || {}
+    }
+  }
 
   // Basic test info
   const parsed = {
     protocol: isUdp ? 'UDP' : 'TCP',
-    duration: end.sum_sent?.seconds || end.sum?.seconds || 0,
-    streams: start?.test_start?.num_streams || 1,
+    duration: summary?.seconds || end.sum_sent?.seconds || end.sum_received?.seconds || end.sum?.seconds || 0,
+    streams: start?.test_start?.num_streams || start?.connected?.length || 1,
 
     // Connection details
-    localHost: start?.connecting_to?.host,
-    localPort: start?.connecting_to?.port,
+    localHost: start?.connecting_to?.host || start?.connected?.[0]?.local_host,
+    localPort: start?.connecting_to?.port || start?.connected?.[0]?.local_port,
 
     // Throughput metrics
     avgBitsPerSecond: summary?.bits_per_second || 0,
     avgBytesTransferred: summary?.bytes || 0,
 
-    // TCP specific
-    retransmits: end.sum_sent?.retransmits || 0,
+    // TCP specific - check both sent and received for retransmits
+    retransmits: end.sum_sent?.retransmits || end.sum_received?.retransmits || 0,
 
     // UDP specific
     jitterMs: end.sum?.jitter_ms || null,
@@ -78,29 +93,40 @@ export function parseIntervals(intervals) {
     return []
   }
 
-  return intervals.map((interval) => {
-    const sum = interval.sum
-    const streams = interval.streams || []
+  return intervals
+    .map((interval) => {
+      const sum = interval.sum
+      const streams = interval.streams || []
 
-    return {
-      start: sum.start,
-      end: sum.end,
-      seconds: sum.seconds,
+      // For server intervals, use the actual data whether it's sender or receiver
+      // Server reports data with sender: false for received data
+      const intervalData = sum
 
-      // Sum metrics for this interval
-      bitsPerSecond: sum.bits_per_second || 0,
-      bytes: sum.bytes || 0,
-      retransmits: sum.retransmits || 0,
+      return {
+        start: intervalData.start,
+        end: intervalData.end,
+        seconds: intervalData.seconds,
 
-      // Per-stream data
-      streams: streams.map((stream) => ({
-        socket: stream.socket,
-        bitsPerSecond: stream.bits_per_second || 0,
-        bytes: stream.bytes || 0,
-        retransmits: stream.retransmits || 0,
-      }))
-    }
-  })
+        // Sum metrics for this interval
+        bitsPerSecond: intervalData.bits_per_second || 0,
+        bytes: intervalData.bytes || 0,
+        retransmits: intervalData.retransmits || 0,
+
+        // Per-stream data
+        streams: streams.map((stream) => ({
+          socket: stream.socket,
+          bitsPerSecond: stream.bits_per_second || 0,
+          bytes: stream.bytes || 0,
+          retransmits: stream.retransmits || 0,
+        }))
+      }
+    })
+    // Filter out intervals that are too short (< 0.5 seconds)
+    // These are often artifacts from test termination with misleading throughput
+    .filter(interval => {
+      const duration = interval.end - interval.start
+      return duration >= 0.5
+    })
 }
 
 /**

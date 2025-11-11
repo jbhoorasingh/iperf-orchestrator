@@ -104,28 +104,52 @@
               <StatusBadge :status="testResult.status" />
             </div>
 
-            <div v-if="testResult.parsed" class="space-y-2">
-              <div class="flex justify-between text-sm">
-                <span class="text-gray-600">Sum Throughput (avg):</span>
-                <span class="font-semibold text-indigo-600">{{ bpsToGbps(testResult.parsed.avgBitsPerSecond) }} Gbps</span>
+            <div v-if="testResult.parsed || testResult.serverParsed" class="space-y-2">
+              <!-- Show metrics - prefer client, fallback to server if no client -->
+              <div v-if="testResult.parsed" class="flex justify-between text-sm">
+                <span class="text-gray-600">Client Throughput (avg):</span>
+                <span class="font-semibold text-green-600">{{ bpsToGbps(testResult.parsed.avgBitsPerSecond) }} Gbps</span>
               </div>
-              <div class="flex justify-between text-sm">
-                <span class="text-gray-600">Peak 1-sec Sum:</span>
-                <span class="font-semibold text-purple-600">{{ bpsToGbps(testResult.peakThroughput) }} Gbps</span>
+              <div v-if="testResult.serverParsed" class="flex justify-between text-sm">
+                <span class="text-gray-600">Server Throughput (avg):</span>
+                <span class="font-semibold text-blue-600">{{ bpsToGbps(testResult.serverParsed.avgBitsPerSecond) }} Gbps</span>
+              </div>
+              <div v-if="testResult.parsed" class="flex justify-between text-sm">
+                <span class="text-gray-600">Client Peak 1-sec:</span>
+                <span class="font-semibold text-green-700">{{ bpsToGbps(testResult.peakThroughput) }} Gbps</span>
+              </div>
+              <div v-if="testResult.serverParsed" class="flex justify-between text-sm">
+                <span class="text-gray-600">Server Peak 1-sec:</span>
+                <span class="font-semibold text-blue-700">{{ bpsToGbps(testResult.serverPeakThroughput) }} Gbps</span>
               </div>
               <div class="flex justify-between text-sm">
                 <span class="text-gray-600">Streams:</span>
-                <span class="font-medium">{{ testResult.parsed.streams }}</span>
-              </div>
-              <div v-if="testResult.parsed.cpuHost" class="flex justify-between text-sm">
-                <span class="text-gray-600">CPU Host/Remote:</span>
-                <span class="font-medium">{{ testResult.parsed.cpuHost.toFixed(1) }}% / {{ testResult.parsed.cpuRemote.toFixed(1) }}%</span>
+                <span class="font-medium">{{ (testResult.parsed || testResult.serverParsed).streams }}</span>
               </div>
 
-              <!-- Sparkline -->
-              <div v-if="testResult.parsed.intervals.length > 0" class="mt-3 pt-3 border-t border-gray-200">
-                <p class="text-xs text-gray-500 mb-2">1-sec Throughput (Gbps)</p>
-                <Sparkline :data="getSparklineData(testResult.parsed)" :width="250" :height="40" />
+              <!-- Sparkline with both client and server overlaid -->
+              <div v-if="(testResult.parsed && testResult.parsed.intervals.length > 0) || (testResult.serverParsed && testResult.serverParsed.intervals.length > 0)" class="mt-3 pt-3 border-t border-gray-200">
+                <div class="flex items-center justify-between mb-2">
+                  <p class="text-xs text-gray-500">1-sec Throughput (Gbps)</p>
+                  <div class="flex items-center gap-3 text-xs">
+                    <div v-if="testResult.parsed" class="flex items-center gap-1">
+                      <div class="w-3 h-2 bg-green-500 rounded-sm"></div>
+                      <span class="text-gray-600">Client</span>
+                    </div>
+                    <div v-if="testResult.serverParsed" class="flex items-center gap-1">
+                      <div class="w-3 h-2 bg-blue-500 rounded-sm"></div>
+                      <span class="text-gray-600">Server</span>
+                    </div>
+                  </div>
+                </div>
+                <Sparkline
+                  :data="testResult.parsed ? getSparklineData(testResult.parsed) : []"
+                  :server-data="testResult.serverParsed ? getSparklineData(testResult.serverParsed) : null"
+                  :width="250"
+                  :height="40"
+                  color="#10b981"
+                  server-color="#3b82f6"
+                />
               </div>
 
               <!-- Actions -->
@@ -310,6 +334,28 @@
                             <div class="flex justify-between">
                               <span class="text-gray-600">Updated:</span>
                               <span class="text-gray-900">{{ formatTime(getServerTask(test).updated_at) }}</span>
+                            </div>
+                          </div>
+
+                          <!-- iperf3 Server Result -->
+                          <div v-if="getServerTask(test).result" class="mt-4">
+                            <button
+                              @click.stop="toggleServerResultExpansion(test.id)"
+                              class="text-sm font-medium text-indigo-600 hover:text-indigo-800 flex items-center"
+                            >
+                              <svg
+                                class="w-4 h-4 mr-1 transition-transform"
+                                :class="{ 'transform rotate-90': expandedServerResults[test.id] }"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                              </svg>
+                              View Server iperf3 Result
+                            </button>
+                            <div v-if="expandedServerResults[test.id]" class="mt-2 bg-gray-900 text-green-400 p-3 rounded-md overflow-x-auto max-h-96 overflow-y-auto">
+                              <pre class="text-xs font-mono">{{ JSON.stringify(getServerTask(test).result, null, 2) }}</pre>
                             </div>
                           </div>
                         </div>
@@ -580,75 +626,181 @@
                 </div>
               </div>
 
-              <!-- KPIs Section -->
-              <div v-if="selectedTestDetail.parsed" class="bg-white border border-gray-200 rounded-lg p-4">
+              <!-- KPIs Section - Client vs Server Comparison -->
+              <div v-if="selectedTestDetail.parsed || selectedTestDetail.serverParsed" class="bg-white border border-gray-200 rounded-lg p-4">
                 <h3 class="text-sm font-semibold text-gray-700 mb-3">Key Performance Indicators</h3>
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div>
-                    <div class="text-xs text-gray-500">Avg Throughput</div>
-                    <div class="text-xl font-bold text-indigo-600">{{ bpsToGbps(selectedTestDetail.parsed.avgBitsPerSecond) }} Gbps</div>
+
+                <!-- Client KPIs -->
+                <div v-if="selectedTestDetail.parsed" class="mb-4">
+                  <div class="flex items-center gap-2 mb-2">
+                    <div class="w-3 h-3 bg-green-500 rounded-full"></div>
+                    <h4 class="text-xs font-semibold text-gray-600 uppercase">Client Perspective</h4>
                   </div>
-                  <div>
-                    <div class="text-xs text-gray-500">Peak 1-sec</div>
-                    <div class="text-xl font-bold text-purple-600">{{ bpsToGbps(selectedTestDetail.peakThroughput) }} Gbps</div>
+                  <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div>
+                      <div class="text-xs text-gray-500">Avg Throughput</div>
+                      <div class="text-xl font-bold text-green-600">{{ bpsToGbps(selectedTestDetail.parsed.avgBitsPerSecond) }} Gbps</div>
+                    </div>
+                    <div>
+                      <div class="text-xs text-gray-500">Peak 1-sec</div>
+                      <div class="text-xl font-bold text-green-700">{{ bpsToGbps(selectedTestDetail.peakThroughput) }} Gbps</div>
+                    </div>
+                    <div>
+                      <div class="text-xs text-gray-500">Total Bytes</div>
+                      <div class="text-xl font-bold text-gray-900">{{ (selectedTestDetail.parsed.avgBytesTransferred / 1_000_000_000).toFixed(2) }} GB</div>
+                    </div>
+                    <div v-if="selectedTestDetail.parsed.protocol === 'TCP'">
+                      <div class="text-xs text-gray-500">Retransmits</div>
+                      <div class="text-xl font-bold text-orange-600">{{ selectedTestDetail.parsed.retransmits }}</div>
+                    </div>
+                    <div v-if="selectedTestDetail.parsed.cpuHost">
+                      <div class="text-xs text-gray-500">CPU Host</div>
+                      <div class="text-xl font-bold text-gray-900">{{ selectedTestDetail.parsed.cpuHost.toFixed(1) }}%</div>
+                    </div>
+                    <div v-if="selectedTestDetail.parsed.cpuRemote">
+                      <div class="text-xs text-gray-500">CPU Remote</div>
+                      <div class="text-xl font-bold text-gray-900">{{ selectedTestDetail.parsed.cpuRemote.toFixed(1) }}%</div>
+                    </div>
+                    <div v-if="selectedTestDetail.parsed.jitterMs !== null">
+                      <div class="text-xs text-gray-500">Jitter</div>
+                      <div class="text-xl font-bold text-gray-900">{{ selectedTestDetail.parsed.jitterMs.toFixed(3) }} ms</div>
+                    </div>
+                    <div v-if="selectedTestDetail.parsed.lostPercent !== null">
+                      <div class="text-xs text-gray-500">Packet Loss</div>
+                      <div class="text-xl font-bold text-red-600">{{ selectedTestDetail.parsed.lostPercent.toFixed(2) }}%</div>
+                    </div>
                   </div>
-                  <div>
-                    <div class="text-xs text-gray-500">Total Bytes</div>
-                    <div class="text-xl font-bold text-gray-900">{{ (selectedTestDetail.parsed.avgBytesTransferred / 1_000_000_000).toFixed(2) }} GB</div>
+                </div>
+
+                <!-- Server KPIs -->
+                <div v-if="selectedTestDetail.serverParsed" class="pt-4 border-t border-gray-200">
+                  <div class="flex items-center gap-2 mb-2">
+                    <div class="w-3 h-3 bg-blue-500 rounded-full"></div>
+                    <h4 class="text-xs font-semibold text-gray-600 uppercase">Server Perspective</h4>
                   </div>
-                  <div v-if="selectedTestDetail.parsed.protocol === 'TCP'">
-                    <div class="text-xs text-gray-500">Retransmits</div>
-                    <div class="text-xl font-bold text-orange-600">{{ selectedTestDetail.parsed.retransmits }}</div>
-                  </div>
-                  <div v-if="selectedTestDetail.parsed.cpuHost">
-                    <div class="text-xs text-gray-500">CPU Host</div>
-                    <div class="text-xl font-bold text-gray-900">{{ selectedTestDetail.parsed.cpuHost.toFixed(1) }}%</div>
-                  </div>
-                  <div v-if="selectedTestDetail.parsed.cpuRemote">
-                    <div class="text-xs text-gray-500">CPU Remote</div>
-                    <div class="text-xl font-bold text-gray-900">{{ selectedTestDetail.parsed.cpuRemote.toFixed(1) }}%</div>
-                  </div>
-                  <div v-if="selectedTestDetail.parsed.jitterMs !== null">
-                    <div class="text-xs text-gray-500">Jitter</div>
-                    <div class="text-xl font-bold text-gray-900">{{ selectedTestDetail.parsed.jitterMs.toFixed(3) }} ms</div>
-                  </div>
-                  <div v-if="selectedTestDetail.parsed.lostPercent !== null">
-                    <div class="text-xs text-gray-500">Packet Loss</div>
-                    <div class="text-xl font-bold text-red-600">{{ selectedTestDetail.parsed.lostPercent.toFixed(2) }}%</div>
+                  <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div>
+                      <div class="text-xs text-gray-500">Avg Throughput</div>
+                      <div class="text-xl font-bold text-blue-600">{{ bpsToGbps(selectedTestDetail.serverParsed.avgBitsPerSecond) }} Gbps</div>
+                    </div>
+                    <div>
+                      <div class="text-xs text-gray-500">Peak 1-sec</div>
+                      <div class="text-xl font-bold text-blue-700">{{ bpsToGbps(selectedTestDetail.serverPeakThroughput) }} Gbps</div>
+                    </div>
+                    <div>
+                      <div class="text-xs text-gray-500">Total Bytes</div>
+                      <div class="text-xl font-bold text-gray-900">{{ (selectedTestDetail.serverParsed.avgBytesTransferred / 1_000_000_000).toFixed(2) }} GB</div>
+                    </div>
+                    <div v-if="selectedTestDetail.serverParsed.protocol === 'TCP'">
+                      <div class="text-xs text-gray-500">Retransmits</div>
+                      <div class="text-xl font-bold text-orange-600">{{ selectedTestDetail.serverParsed.retransmits }}</div>
+                    </div>
+                    <div v-if="selectedTestDetail.serverParsed.cpuHost">
+                      <div class="text-xs text-gray-500">CPU Host</div>
+                      <div class="text-xl font-bold text-gray-900">{{ selectedTestDetail.serverParsed.cpuHost.toFixed(1) }}%</div>
+                    </div>
+                    <div v-if="selectedTestDetail.serverParsed.cpuRemote">
+                      <div class="text-xs text-gray-500">CPU Remote</div>
+                      <div class="text-xl font-bold text-gray-900">{{ selectedTestDetail.serverParsed.cpuRemote.toFixed(1) }}%</div>
+                    </div>
+                    <div v-if="selectedTestDetail.serverParsed.jitterMs !== null">
+                      <div class="text-xs text-gray-500">Jitter</div>
+                      <div class="text-xl font-bold text-gray-900">{{ selectedTestDetail.serverParsed.jitterMs.toFixed(3) }} ms</div>
+                    </div>
+                    <div v-if="selectedTestDetail.serverParsed.lostPercent !== null">
+                      <div class="text-xs text-gray-500">Packet Loss</div>
+                      <div class="text-xl font-bold text-red-600">{{ selectedTestDetail.serverParsed.lostPercent.toFixed(2) }}%</div>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <!-- Intervals Table -->
-              <div v-if="selectedTestDetail.parsed && selectedTestDetail.parsed.intervals.length > 0" class="bg-white border border-gray-200 rounded-lg p-4">
-                <h3 class="text-sm font-semibold text-gray-700 mb-3">Per-Second Intervals</h3>
+              <!-- Combined Intervals Table - Client vs Server -->
+              <div v-if="(selectedTestDetail.parsed && selectedTestDetail.parsed.intervals.length > 0) || (selectedTestDetail.serverParsed && selectedTestDetail.serverParsed.intervals.length > 0)" class="bg-white border border-gray-200 rounded-lg p-4">
+                <h3 class="text-sm font-semibold text-gray-700 mb-3">Per-Second Intervals Comparison</h3>
                 <div class="overflow-x-auto max-h-96 overflow-y-auto">
                   <table class="min-w-full divide-y divide-gray-200 text-sm">
                     <thead class="bg-gray-50 sticky top-0">
                       <tr>
-                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Interval</th>
-                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Throughput (Gbps)</th>
-                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Bytes</th>
-                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase" v-if="selectedTestDetail.parsed.protocol === 'TCP'">Retransmits</th>
+                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase" rowspan="2">Interval</th>
+                        <th class="px-3 py-2 text-center text-xs font-medium text-green-600 uppercase border-l border-gray-300" colspan="3" v-if="selectedTestDetail.parsed">
+                          <div class="flex items-center justify-center gap-1">
+                            <div class="w-2 h-2 bg-green-500 rounded-full"></div>
+                            Client
+                          </div>
+                        </th>
+                        <th class="px-3 py-2 text-center text-xs font-medium text-blue-600 uppercase border-l border-gray-300" colspan="3" v-if="selectedTestDetail.serverParsed">
+                          <div class="flex items-center justify-center gap-1">
+                            <div class="w-2 h-2 bg-blue-500 rounded-full"></div>
+                            Server
+                          </div>
+                        </th>
+                      </tr>
+                      <tr>
+                        <template v-if="selectedTestDetail.parsed">
+                          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase border-l border-gray-300">Throughput (Gbps)</th>
+                          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Bytes</th>
+                          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase" v-if="selectedTestDetail.parsed.protocol === 'TCP'">Retrans</th>
+                        </template>
+                        <template v-if="selectedTestDetail.serverParsed">
+                          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase border-l border-gray-300">Throughput (Gbps)</th>
+                          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Bytes</th>
+                          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase" v-if="selectedTestDetail.serverParsed.protocol === 'TCP'">Retrans</th>
+                        </template>
                       </tr>
                     </thead>
                     <tbody class="bg-white divide-y divide-gray-200">
-                      <tr v-for="(interval, idx) in selectedTestDetail.parsed.intervals" :key="idx" class="hover:bg-gray-50">
-                        <td class="px-3 py-2 whitespace-nowrap">{{ interval.start.toFixed(1) }} - {{ interval.end.toFixed(1) }}s</td>
-                        <td class="px-3 py-2 whitespace-nowrap font-semibold text-indigo-600">{{ bpsToGbps(interval.bitsPerSecond) }}</td>
-                        <td class="px-3 py-2 whitespace-nowrap">{{ (interval.bytes / 1_000_000).toFixed(2) }} MB</td>
-                        <td class="px-3 py-2 whitespace-nowrap" v-if="selectedTestDetail.parsed.protocol === 'TCP'">{{ interval.retransmits || 0 }}</td>
+                      <tr v-for="idx in Math.max(selectedTestDetail.parsed?.intervals?.length || 0, selectedTestDetail.serverParsed?.intervals?.length || 0)" :key="idx" class="hover:bg-gray-50">
+                        <!-- Interval time (use client if available, otherwise server) -->
+                        <td class="px-3 py-2 whitespace-nowrap font-medium text-gray-700">
+                          {{ (selectedTestDetail.parsed?.intervals[idx - 1] || selectedTestDetail.serverParsed?.intervals[idx - 1])?.start.toFixed(1) }} -
+                          {{ (selectedTestDetail.parsed?.intervals[idx - 1] || selectedTestDetail.serverParsed?.intervals[idx - 1])?.end.toFixed(1) }}s
+                        </td>
+
+                        <!-- Client data -->
+                        <template v-if="selectedTestDetail.parsed">
+                          <td class="px-3 py-2 whitespace-nowrap font-semibold text-green-600 border-l border-gray-300">
+                            {{ selectedTestDetail.parsed.intervals[idx - 1] ? bpsToGbps(selectedTestDetail.parsed.intervals[idx - 1].bitsPerSecond) : '-' }}
+                          </td>
+                          <td class="px-3 py-2 whitespace-nowrap text-gray-700">
+                            {{ selectedTestDetail.parsed.intervals[idx - 1] ? (selectedTestDetail.parsed.intervals[idx - 1].bytes / 1_000_000).toFixed(2) + ' MB' : '-' }}
+                          </td>
+                          <td class="px-3 py-2 whitespace-nowrap text-gray-700" v-if="selectedTestDetail.parsed.protocol === 'TCP'">
+                            {{ selectedTestDetail.parsed.intervals[idx - 1]?.retransmits || '-' }}
+                          </td>
+                        </template>
+
+                        <!-- Server data -->
+                        <template v-if="selectedTestDetail.serverParsed">
+                          <td class="px-3 py-2 whitespace-nowrap font-semibold text-blue-600 border-l border-gray-300">
+                            {{ selectedTestDetail.serverParsed.intervals[idx - 1] ? bpsToGbps(selectedTestDetail.serverParsed.intervals[idx - 1].bitsPerSecond) : '-' }}
+                          </td>
+                          <td class="px-3 py-2 whitespace-nowrap text-gray-700">
+                            {{ selectedTestDetail.serverParsed.intervals[idx - 1] ? (selectedTestDetail.serverParsed.intervals[idx - 1].bytes / 1_000_000).toFixed(2) + ' MB' : '-' }}
+                          </td>
+                          <td class="px-3 py-2 whitespace-nowrap text-gray-700" v-if="selectedTestDetail.serverParsed.protocol === 'TCP'">
+                            {{ selectedTestDetail.serverParsed.intervals[idx - 1]?.retransmits || '-' }}
+                          </td>
+                        </template>
                       </tr>
                     </tbody>
                   </table>
                 </div>
               </div>
 
-              <!-- Raw JSON Section -->
+              <!-- Raw JSON Section (Client) -->
               <div v-if="selectedTestDetail.clientTask && selectedTestDetail.clientTask.result" class="bg-white border border-gray-200 rounded-lg p-4">
-                <h3 class="text-sm font-semibold text-gray-700 mb-3">Raw JSON Result</h3>
+                <h3 class="text-sm font-semibold text-gray-700 mb-3">Client-Side Raw JSON Result</h3>
                 <div class="bg-gray-900 text-green-400 p-4 rounded-md overflow-x-auto max-h-96 overflow-y-auto">
                   <pre class="text-xs font-mono">{{ JSON.stringify(selectedTestDetail.clientTask.result, null, 2) }}</pre>
+                </div>
+              </div>
+
+              <!-- Raw JSON Section (Server) -->
+              <div v-if="selectedTestDetail.serverTask && selectedTestDetail.serverTask.result" class="bg-white border border-gray-200 rounded-lg p-4">
+                <h3 class="text-sm font-semibold text-gray-700 mb-3">Server-Side Raw JSON Result</h3>
+                <div class="bg-gray-900 text-blue-400 p-4 rounded-md overflow-x-auto max-h-96 overflow-y-auto">
+                  <pre class="text-xs font-mono">{{ JSON.stringify(selectedTestDetail.serverTask.result, null, 2) }}</pre>
                 </div>
               </div>
             </div>
@@ -709,6 +861,7 @@ export default {
     const showAddTestModal = ref(false)
     const expandedTests = ref({})
     const expandedResults = ref({})
+    const expandedServerResults = ref({})
     const selectedTestDetail = ref(null)
     const newTest = ref({
       server_agent_id: '',
@@ -832,6 +985,10 @@ export default {
       expandedResults.value[testId] = !expandedResults.value[testId]
     }
 
+    const toggleServerResultExpansion = (testId) => {
+      expandedServerResults.value[testId] = !expandedServerResults.value[testId]
+    }
+
     const openTestDetail = (testResult) => {
       selectedTestDetail.value = testResult
     }
@@ -876,13 +1033,24 @@ export default {
           serverTask,
           status: getTestStatus(test),
           parsed: null,
-          peakThroughput: 0
+          serverParsed: null,
+          peakThroughput: 0,
+          serverPeakThroughput: 0
         }
 
+        // Parse client result
         if (clientTask && clientTask.result) {
           result.parsed = parseIperfResult(clientTask.result)
           if (result.parsed) {
             result.peakThroughput = getPeakThroughput(result.parsed)
+          }
+        }
+
+        // Parse server result
+        if (serverTask && serverTask.result && typeof serverTask.result === 'object' && serverTask.result.end) {
+          result.serverParsed = parseIperfResult(serverTask.result)
+          if (result.serverParsed) {
+            result.serverPeakThroughput = getPeakThroughput(result.serverParsed)
           }
         }
 
@@ -921,6 +1089,7 @@ export default {
       showAddTestModal,
       expandedTests,
       expandedResults,
+      expandedServerResults,
       selectedTestDetail,
       newTest,
       addTest,
@@ -931,6 +1100,7 @@ export default {
       getClientTask,
       toggleTestExpansion,
       toggleResultExpansion,
+      toggleServerResultExpansion,
       openTestDetail,
       closeTestDetail,
       downloadJSON,
