@@ -340,9 +340,15 @@ class IperfAgent:
             self.log("error", "Mark started error", {"error": str(e)})
             return False
     
-    async def submit_task_result(self, task_id: int, status: str, result: Optional[Dict] = None, 
+    async def submit_task_result(self, task_id: int, status: str, result: Optional[Dict] = None,
                                 stderr: str = "", exit_code: int = 0) -> bool:
-        """Submit task result"""
+        """Submit task result
+
+        TODO: Add gzip compression for large results to avoid 413 errors
+              - Compress result JSON if size > threshold (e.g., 1MB)
+              - Add Content-Encoding: gzip header
+              - Backend needs to decompress on receive
+        """
         try:
             headers = {
                 "X-AGENT-NAME": self.settings.agent_name,
@@ -351,7 +357,7 @@ class IperfAgent:
                 "Idempotency-Key": str(uuid.uuid4()),
                 "Content-Type": "application/json"
             }
-            
+
             payload = {
                 "status": status,
                 "result": result,

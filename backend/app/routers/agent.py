@@ -191,7 +191,14 @@ async def submit_task_result(
     body: TaskResultRequest,
     db: Session = Depends(get_db)
 ):
-    """Submit task result"""
+    """Submit task result
+
+    TODO: Add support for gzip-compressed results
+          - Check for Content-Encoding: gzip header
+          - Decompress body before parsing JSON
+          - Store decompressed result in database
+          - Coordinate with agent compression implementation
+    """
     agent = get_agent_from_headers(request, db)
 
     task = db.query(Task).filter(
