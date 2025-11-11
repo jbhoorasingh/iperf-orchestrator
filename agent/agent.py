@@ -63,6 +63,7 @@ class RunningProcess:
     port: Optional[int]
     pid: int
     process: subprocess.Popen
+    output_file: Optional[Path] = None  # File path for server stdout
 
 
 class IperfAgent:
@@ -73,11 +74,13 @@ class IperfAgent:
         self.running_tasks: Dict[int, asyncio.Task] = {}  # Track concurrent task execution
         self.should_exit = False
 
-        # Create logs and results directories
+        # Create logs, results, and temp directories
         self.logs_dir = Path("logs")
         self.results_dir = Path("results") / settings.agent_name
+        self.temp_dir = Path("temp") / settings.agent_name
         self.logs_dir.mkdir(exist_ok=True)
         self.results_dir.mkdir(parents=True, exist_ok=True)
+        self.temp_dir.mkdir(parents=True, exist_ok=True)
 
         # Set up file logging
         self._setup_logging()
@@ -378,11 +381,124 @@ class IperfAgent:
         except Exception as e:
             self.log("error", "Submit result error", {"error": str(e)})
             return False
-    
+
+    async def _capture_and_submit_server_result(self, task_id: int, process: subprocess.Popen, port: int, output_file: Path):
+        """Capture server output from file and submit as result update"""
+        try:
+            # Wait for process to terminate
+            await asyncio.get_event_loop().run_in_executor(None, process.wait)
+
+            # Read output from file
+            def read_output_file():
+                if output_file.exists():
+                    with open(output_file, 'r') as f:
+                        return f.read()
+                return None
+
+            stdout = await asyncio.get_event_loop().run_in_executor(None, read_output_file)
+
+            # Get stderr if available
+            stderr = ""
+            if process.stderr:
+                stderr_data = await asyncio.get_event_loop().run_in_executor(None, process.stderr.read)
+                if stderr_data:
+                    stderr = stderr_data
+
+            # Try to parse JSON output (may contain multiple JSON objects)
+            if stdout and stdout.strip():
+                try:
+                    # iperf3 server with -J may output multiple JSON objects
+                    # Parse all objects and take the first complete one (has test data)
+                    json_objects = []
+                    decoder = json.JSONDecoder()
+                    idx = 0
+                    stdout_stripped = stdout.strip()
+
+                    while idx < len(stdout_stripped):
+                        try:
+                            obj, end_idx = decoder.raw_decode(stdout_stripped, idx)
+                            json_objects.append(obj)
+                            idx = end_idx
+                            # Skip whitespace
+                            while idx < len(stdout_stripped) and stdout_stripped[idx].isspace():
+                                idx += 1
+                        except json.JSONDecodeError:
+                            break
+
+                    # Find the best result (prefer objects with 'end' field and actual data)
+                    result = None
+                    for obj in json_objects:
+                        if 'end' in obj and obj.get('end'):
+                            # This is a complete test result
+                            result = obj
+                            break
+
+                    # If no complete result found, use the first non-error object
+                    if not result and json_objects:
+                        for obj in json_objects:
+                            if 'error' not in obj or obj.get('intervals'):
+                                result = obj
+                                break
+                        if not result:
+                            result = json_objects[0]
+
+                    if result:
+                        # Save server result to permanent file
+                        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+                        result_file = self.results_dir / f"task_{task_id}_server_{timestamp}.json"
+                        with open(result_file, 'w') as f:
+                            json.dump(result, f, indent=2)
+
+                        self.log("info", "Server result captured", {
+                            "task_id": task_id,
+                            "port": port,
+                            "result_file": str(result_file),
+                            "json_objects_found": len(json_objects)
+                        })
+
+                        # Submit server result as an update
+                        await self.submit_task_result(task_id, "succeeded", result, stderr, process.returncode or 0)
+
+                        # Clean up temp file
+                        try:
+                            output_file.unlink()
+                        except Exception:
+                            pass
+                    else:
+                        self.log("warning", "No valid server result found in output", {
+                            "task_id": task_id,
+                            "port": port,
+                            "json_objects_found": len(json_objects)
+                        })
+
+                except Exception as e:
+                    self.log("warning", "Failed to parse server output", {
+                        "task_id": task_id,
+                        "port": port,
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "stdout_preview": stdout[:200] if stdout else ""
+                    })
+            else:
+                self.log("warning", "Server produced no output", {
+                    "task_id": task_id,
+                    "port": port,
+                    "output_file": str(output_file),
+                    "file_exists": output_file.exists()
+                })
+
+        except Exception as e:
+            self.log("error", "Failed to capture server result", {
+                "task_id": task_id,
+                "port": port,
+                "error": str(e),
+                "traceback": traceback.format_exc()
+            })
+
     def build_iperf_command(self, task_type: str, payload: Dict[str, Any]) -> List[str]:
         """Build iperf3 command based on task type and payload"""
         if task_type == "iperf_server_start":
-            cmd = ["iperf3", "-s", "-p", str(payload["port"])]
+            cmd = ["iperf3", "-s", "-p", str(payload["port"]), "-J"]  # Added -J for JSON output
             if payload.get("udp", False):
                 cmd.append("-u")
             return cmd
@@ -439,36 +555,42 @@ class IperfAgent:
         """Execute server task"""
         try:
             cmd = self.build_iperf_command("iperf_server_start", payload)
-            
-            # Start server process
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-            
-            # Store process info
+
+            # Create output file for server stdout
+            output_file = self.temp_dir / f"server_task_{task_id}.json"
+
+            # Start server process with stdout redirected to file
+            with open(output_file, 'w') as stdout_f:
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=stdout_f,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+
+            # Store process info with output file path
             self.running_processes[task_id] = RunningProcess(
                 task_id=task_id,
                 process_type="server",
                 port=payload["port"],
                 pid=process.pid,
-                process=process
+                process=process,
+                output_file=output_file
             )
-            
+
             # Mark as started
             await self.mark_task_started(task_id, process.pid)
-            
+
             self.log("info", "Server task started", {
                 "task_id": task_id,
                 "pid": process.pid,
-                "port": payload["port"]
+                "port": payload["port"],
+                "output_file": str(output_file)
             })
-            
+
             # For server tasks, mark as succeeded immediately (v1 behavior)
             await self.submit_task_result(task_id, "succeeded", {"started": True, "pid": process.pid})
-            
+
         except Exception as e:
             self.log("error", "Server task error", {"task_id": task_id, "error": str(e)})
             await self.submit_task_result(task_id, "failed", stderr=str(e), exit_code=1)
@@ -624,43 +746,70 @@ class IperfAgent:
         """Execute kill_all task"""
         try:
             killed_count = 0
-            
+            server_result_tasks = []
+
             for proc in list(self.running_processes.values()):
                 try:
+                    # Terminate the process
                     proc.process.terminate()
-                    # Wait asynchronously for process to exit
-                    try:
-                        await asyncio.wait_for(
-                            asyncio.get_event_loop().run_in_executor(None, proc.process.wait),
-                            timeout=5
+
+                    # For server processes, capture results after termination
+                    if proc.process_type == "server":
+                        # Create async task to capture server result (non-blocking)
+                        capture_task = asyncio.create_task(
+                            self._capture_and_submit_server_result(
+                                proc.task_id,
+                                proc.process,
+                                proc.port,
+                                proc.output_file
+                            )
                         )
-                        killed_count += 1
-                        self.log("info", "Process killed", {
-                            "task_id": proc.task_id,
-                            "pid": proc.pid,
-                            "type": proc.process_type
-                        })
-                    except asyncio.TimeoutError:
-                        proc.process.kill()
-                        killed_count += 1
-                        self.log("info", "Process force killed", {
-                            "task_id": proc.task_id,
-                            "pid": proc.pid,
-                            "type": proc.process_type
-                        })
+                        server_result_tasks.append(capture_task)
+                    else:
+                        # For non-server processes, just wait for termination
+                        try:
+                            await asyncio.wait_for(
+                                asyncio.get_event_loop().run_in_executor(None, proc.process.wait),
+                                timeout=5
+                            )
+                        except asyncio.TimeoutError:
+                            proc.process.kill()
+                            await asyncio.get_event_loop().run_in_executor(None, proc.process.wait)
+
+                    killed_count += 1
+                    self.log("info", "Process killed", {
+                        "task_id": proc.task_id,
+                        "pid": proc.pid,
+                        "type": proc.process_type,
+                        "capturing_result": proc.process_type == "server"
+                    })
+
                 except Exception as e:
                     self.log("error", "Failed to kill process", {
                         "task_id": proc.task_id,
                         "pid": proc.pid,
                         "error": str(e)
                     })
-            
+
             # Clear all running processes
             self.running_processes.clear()
-            
+
+            # Wait for all server result captures to complete (with timeout)
+            if server_result_tasks:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*server_result_tasks, return_exceptions=True),
+                        timeout=10
+                    )
+                except asyncio.TimeoutError:
+                    self.log("warning", "Server result capture timed out", {
+                        "task_id": task_id,
+                        "pending_captures": len(server_result_tasks)
+                    })
+
             await self.submit_task_result(task_id, "succeeded", {"killed": True, "count": killed_count})
             self.log("info", "Kill all completed", {"task_id": task_id, "killed_count": killed_count})
-        
+
         except Exception as e:
             self.log("error", "Kill all error", {"task_id": task_id, "error": str(e)})
             await self.submit_task_result(task_id, "failed", stderr=str(e), exit_code=1)
@@ -710,6 +859,14 @@ class IperfAgent:
             "agent_name": self.settings.agent_name,
             "manager_url": self.settings.manager_url
         })
+
+        # Clean up any leftover temp files from previous runs
+        try:
+            for temp_file in self.temp_dir.glob("server_task_*.json"):
+                temp_file.unlink()
+                self.log("info", "Cleaned up temp file", {"file": str(temp_file)})
+        except Exception as e:
+            self.log("warning", "Failed to clean up temp files", {"error": str(e)})
 
         # Clean up any orphaned iperf3 processes from previous runs
         await self._cleanup_orphaned_iperf_processes()
@@ -808,6 +965,8 @@ class IperfAgent:
                 "count": len(self.running_processes)
             })
 
+            server_result_tasks = []
+
             for task_id, proc in list(self.running_processes.items()):
                 try:
                     self.log("info", "Killing iperf process on shutdown", {
@@ -819,17 +978,32 @@ class IperfAgent:
 
                     # Try graceful termination first
                     proc.process.terminate()
-                    try:
-                        # Wait up to 2 seconds for graceful shutdown
-                        proc.process.wait(timeout=2)
-                    except subprocess.TimeoutExpired:
-                        # Force kill if it didn't terminate
-                        proc.process.kill()
-                        proc.process.wait()
+
+                    # For server processes, capture results
+                    if proc.process_type == "server":
+                        capture_task = asyncio.create_task(
+                            self._capture_and_submit_server_result(
+                                task_id,
+                                proc.process,
+                                proc.port,
+                                proc.output_file
+                            )
+                        )
+                        server_result_tasks.append(capture_task)
+                    else:
+                        # For non-server processes, just wait for termination
+                        try:
+                            # Wait up to 2 seconds for graceful shutdown
+                            proc.process.wait(timeout=2)
+                        except subprocess.TimeoutExpired:
+                            # Force kill if it didn't terminate
+                            proc.process.kill()
+                            proc.process.wait()
 
                     self.log("info", "Process killed on shutdown", {
                         "task_id": task_id,
-                        "pid": proc.pid
+                        "pid": proc.pid,
+                        "capturing_result": proc.process_type == "server"
                     })
 
                 except Exception as e:
@@ -840,6 +1014,19 @@ class IperfAgent:
                     })
 
             self.running_processes.clear()
+
+            # Wait for all server result captures to complete
+            if server_result_tasks:
+                self.log("info", "Waiting for server result captures to complete", {
+                    "count": len(server_result_tasks)
+                })
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*server_result_tasks, return_exceptions=True),
+                        timeout=10
+                    )
+                except asyncio.TimeoutError:
+                    self.log("warning", "Server result capture timed out on shutdown")
 
         # Wait for any running tasks to complete
         if self.running_tasks:
