@@ -140,41 +140,50 @@
               </p>
 
               <!-- Metadata Grid -->
-              <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                <div class="flex items-center text-gray-500">
-                  <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <span>{{ exercise.duration_seconds }}s</span>
+              <div class="space-y-2 text-sm">
+                <!-- Primary Info Row -->
+                <div class="flex items-center gap-4">
+                  <div class="flex items-center text-gray-600">
+                    <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span class="font-medium">{{ exercise.duration_seconds }}s duration</span>
+                  </div>
+
+                  <div class="flex items-center text-gray-500">
+                    <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                    </svg>
+                    <span>ID: {{ exercise.id }}</span>
+                  </div>
                 </div>
 
-                <div class="flex items-center text-gray-500">
-                  <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                  </svg>
-                  <span>ID: {{ exercise.id }}</span>
-                </div>
+                <!-- Timeline Row -->
+                <div class="flex items-center gap-6 text-xs">
+                  <div class="flex items-center text-gray-600">
+                    <svg class="w-4 h-4 mr-1.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    <span class="text-gray-500">Created:</span>
+                    <span class="ml-1 font-medium text-gray-700">{{ formatShortTime(exercise.created_at) }}</span>
+                  </div>
 
-                <div v-if="exercise.started_at" class="flex items-center text-gray-500">
-                  <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <span>Started: {{ formatShortTime(exercise.started_at) }}</span>
-                </div>
+                  <div v-if="exercise.started_at" class="flex items-center text-gray-600">
+                    <svg class="w-4 h-4 mr-1.5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span class="text-gray-500">Started:</span>
+                    <span class="ml-1 font-semibold text-green-700">{{ formatShortTime(exercise.started_at) }}</span>
+                  </div>
 
-                <div v-if="exercise.ended_at" class="flex items-center text-gray-500">
-                  <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-                  </svg>
-                  <span>Ended: {{ formatShortTime(exercise.ended_at) }}</span>
-                </div>
-
-                <div class="flex items-center text-gray-500">
-                  <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                  </svg>
-                  <span>Created: {{ formatShortTime(exercise.created_at) }}</span>
+                  <div v-if="exercise.ended_at" class="flex items-center text-gray-600">
+                    <svg class="w-4 h-4 mr-1.5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span class="text-gray-500">Ended:</span>
+                    <span class="ml-1 font-semibold text-blue-700">{{ formatShortTime(exercise.ended_at) }}</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -326,19 +335,24 @@ export default {
       const diffHours = Math.floor(diffMs / 3600000)
       const diffDays = Math.floor(diffMs / 86400000)
 
-      if (diffMins < 1) return 'Just now'
-      if (diffMins < 60) return `${diffMins}m ago`
-      if (diffHours < 24) return `${diffHours}h ago`
-      if (diffDays < 7) return `${diffDays}d ago`
-
-      // Format as MM/DD/YY HH:mm
-      return date.toLocaleString('en-US', {
-        month: 'numeric',
+      // Always show actual date/time for clarity
+      const dateStr = date.toLocaleString('en-US', {
+        month: 'short',
         day: 'numeric',
-        year: '2-digit',
         hour: '2-digit',
-        minute: '2-digit'
+        minute: '2-digit',
+        hour12: true
       })
+
+      // Add relative time for recent items
+      let relativeStr = ''
+      if (diffMins < 1) relativeStr = '(now)'
+      else if (diffMins < 60) relativeStr = `(${diffMins}m ago)`
+      else if (diffHours < 24) relativeStr = `(${diffHours}h ago)`
+      else if (diffDays === 1) relativeStr = '(yesterday)'
+      else if (diffDays < 7) relativeStr = `(${diffDays}d ago)`
+
+      return relativeStr ? `${dateStr} ${relativeStr}` : dateStr
     }
 
     const getStatusText = (exercise) => {
